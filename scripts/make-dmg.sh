@@ -1,13 +1,13 @@
 #!/bin/zsh
-# Build a Release copy of Location Spoofer and package it as a drag-to-Applications DMG.
+# Build a Release copy of LocationLab and package it as a drag-to-Applications DMG.
 # For local installs only: signed with your Apple Development certificate, not notarized.
 #
 # Usage:  ./scripts/make-dmg.sh
-# Output: dist/Location Spoofer <version>.dmg
+# Output: dist/LocationLab <version>.dmg
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Location Spoofer"
+APP_NAME="LocationLab"
 BUILD="$ROOT/build"
 DIST="$ROOT/dist"
 STAGE="$BUILD/dmg-staging"

@@ -1,12 +1,13 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" height="128" alt="Location Spoofer icon">
+  <img src="docs/icon.png" width="128" height="128" alt="LocationLab icon">
 </p>
 
-<h1 align="center">Location Spoofer</h1>
+<h1 align="center">LocationLab</h1>
 
 <p align="center">
-  A small macOS app for testing location-aware iOS apps.<br>
-  Pick a place and your connected iPhone's system-wide GPS location moves there. One click puts it back.
+  <b>Simulate GPS on your iPhone for testing location-aware apps.</b><br>
+  A small Mac app for iOS developers: pick a place and your connected iPhone's location moves there.<br>
+  One click puts it back.
 </p>
 
 <p align="center">
@@ -17,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="760" alt="Location Spoofer showing the Toronto place list">
+  <img src="docs/screenshot.png" width="760" alt="LocationLab showing the Toronto place list">
 </p>
 
 ## Features
@@ -47,14 +48,14 @@ The location is set system-wide, so Apple Maps and every other app on the phone 
 
 ### Download
 
-Get the `.dmg` from [Releases](../../releases), open it and drag **Location Spoofer** into **Applications**.
+Get the `.dmg` from [Releases](../../releases), open it and drag **LocationLab** into **Applications**.
 
 > The app isn't notarized yet, so macOS blocks it the first time you open it. Go to
 > **System Settings › Privacy & Security** and click **Open Anyway**. You only need to do this once.
 
 ### Build from source
 
-1. Clone the repo and open `Location Spoofer.xcodeproj` in Xcode.
+1. Clone the repo and open `LocationLab.xcodeproj` in Xcode.
 2. In the target's **Signing & Capabilities** tab, choose your own team (or *Sign to Run Locally*).
    **App Sandbox must stay off**: the app has to launch `pymobiledevice3` and, optionally, run `tunneld` as root.
 3. Press <kbd>⌘R</kbd>.
@@ -63,7 +64,7 @@ To build a drag-to-install DMG:
 
 ```bash
 ./scripts/make-dmg.sh
-# → dist/Location Spoofer <version>.dmg
+# → dist/LocationLab <version>.dmg
 ```
 
 ## Usage
@@ -77,7 +78,7 @@ To build a drag-to-install DMG:
 
 ## How it works
 
-Location Spoofer is a SwiftUI front end for `pymobiledevice3`:
+LocationLab is a SwiftUI front end for `pymobiledevice3`:
 
 | Action | Command |
 | --- | --- |
@@ -110,17 +111,17 @@ The **Log** pane at the bottom of the window shows the full CLI output for every
 ## Project layout
 
 ```
-Location Spoofer/
-├── App.swift            SwiftUI app, window, status bar, place lists, settings
-├── Spoofer.swift        Runs pymobiledevice3, tracks state, tunnel control, error mapping
-├── AddressSearch.swift  MapKit address search (suggestions + lookup)
-└── Places.swift         Place / City models (Codable) and the built-in list
-scripts/make-dmg.sh      Release build + DMG packaging
+LocationLab/
+├── App.swift                 SwiftUI app, window, status bar, place lists, settings
+├── LocationController.swift  Runs pymobiledevice3, tracks state, tunnel control, error mapping
+├── AddressSearch.swift       MapKit address search (suggestions + lookup)
+└── Places.swift              Place / City models (Codable) and the built-in list
+scripts/make-dmg.sh           Release build + DMG packaging
 ```
 
 ## Disclaimer
 
-Location Spoofer is meant for testing apps you develop on devices you own. Only use it where you're allowed to; some apps and services prohibit faking your location. It isn't affiliated with or endorsed by Apple.
+LocationLab is a developer tool for testing apps you develop on devices you own. Only use it where you're allowed to; some apps and services prohibit faking your location. It isn't affiliated with or endorsed by Apple.
 
 ## License
 

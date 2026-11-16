@@ -3,7 +3,7 @@ import AppKit
 import MapKit
 
 @main
-struct LocationSpooferApp: App {
+struct LocationLabApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     init() {
@@ -12,7 +12,7 @@ struct LocationSpooferApp: App {
     }
 
     var body: some Scene {
-        Window("Location Spoofer", id: "main") {
+        Window("LocationLab", id: "main") {
             ContentView()
                 .frame(minWidth: 780, minHeight: 540)
         }
@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Quitting always restores the phone's real location.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let s = Spoofer.shared
+        let s = LocationController.shared
         guard s.activePlace != nil || s.hasHolder || s.phase == .setting else { return .terminateNow }
         Task { @MainActor in
             await s.clearNow()
@@ -65,7 +65,7 @@ extension Notification.Name {
 }
 
 struct ContentView: View {
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
     @State private var selection: SidebarItem? = Catalog.cities.first.map { .city($0.id) }
     @State private var showLog = false
     @StateObject private var search = AddressSearch()
@@ -111,7 +111,7 @@ struct ContentView: View {
 }
 
 struct StatusBar: View {
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
 
     var body: some View {
         HStack(spacing: 12) {
@@ -179,7 +179,7 @@ struct StatusBar: View {
 /// When it's off this is just a small "…" menu; when it's running it shows a green "tunneld" pill
 /// so you know a root process is up and can stop it.
 struct TunnelControl: View {
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
 
     var body: some View {
         if s.tunnelRunning == true {
@@ -235,7 +235,7 @@ struct ErrorBanner: View {
 
 struct PlaceRow: View {
     let place: Place
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
 
     var body: some View {
         let isActive = s.activePlace == place && s.phase == .active
@@ -362,7 +362,7 @@ struct AddressSearchView: View {
 
 struct LogDrawer: View {
     @Binding var expanded: Bool
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -400,7 +400,7 @@ struct LogDrawer: View {
 // MARK: - Settings
 
 struct SettingsView: View {
-    @ObservedObject private var s = Spoofer.shared
+    @ObservedObject private var s = LocationController.shared
 
     var body: some View {
         Form {

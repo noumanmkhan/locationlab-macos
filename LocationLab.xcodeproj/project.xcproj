@@ -11,20 +11,20 @@
     ],
   },
   "files": [
-    { "kind": "folder", "path": "Location Spoofer", "target-membership": [ "Location Spoofer" ] },
+    { "kind": "folder", "path": "LocationLab", "target-membership": [ "LocationLab" ] },
     {
       "kind": "group",
       "name": "Products",
       "children": [
-        { "path": "<PRODUCTS>/Location Spoofer.app", "id": "9B3D6D0A30AB051B000D0637", "type": "wrapper.application", "index": false },
+        { "path": "<PRODUCTS>/LocationLab.app", "id": "9B3D6D0A30AB051B000D0637", "type": "wrapper.application", "index": false },
       ],
     },
   ],
   "targets": [
     {
-      "name": "Location Spoofer",
+      "name": "LocationLab",
       "id": "9B3D6D0930AB051B000D0637",
-      "product": "Products/Location Spoofer.app",
+      "product": "Products/LocationLab.app",
       "product-type": "application",
       "build-phases": [
         "compile-sources",
@@ -49,7 +49,7 @@
           "@executable_path/../Frameworks",
         ],
         "MARKETING_VERSION": "0.1.0",
-        "PRODUCT_BUNDLE_IDENTIFIER": "ca.noumankhan.Location-Spoofer",
+        "PRODUCT_BUNDLE_IDENTIFIER": "ca.noumankhan.LocationLab",
         "PRODUCT_NAME": "$(TARGET_NAME)",
         "REGISTER_APP_GROUPS": "YES",
         "STRING_CATALOG_GENERATE_SYMBOLS": "YES",

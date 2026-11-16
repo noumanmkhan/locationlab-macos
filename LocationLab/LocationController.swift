@@ -37,8 +37,8 @@ nonisolated enum Shell {
 }
 
 @MainActor
-final class Spoofer: ObservableObject {
-    static let shared = Spoofer()
+final class LocationController: ObservableObject {
+    static let shared = LocationController()
 
     enum Phase: Equatable { case idle, setting, active, clearing }
 
@@ -160,14 +160,14 @@ final class Spoofer: ObservableObject {
                 if data.isEmpty { handle.readabilityHandler = nil; return }
                 let text = String(decoding: data, as: UTF8.self)
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { Spoofer.shared.holderOutput(pid, text) }
+                    MainActor.assumeIsolated { LocationController.shared.holderOutput(pid, text) }
                 }
             }
             p.terminationHandler = { proc in
                 let code = proc.terminationStatus
                 // Hop via main queue *after* any pending output blocks so the error text is complete.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    MainActor.assumeIsolated { Spoofer.shared.holderExited(pid, code: code) }
+                    MainActor.assumeIsolated { LocationController.shared.holderExited(pid, code: code) }
                 }
             }
             do {
