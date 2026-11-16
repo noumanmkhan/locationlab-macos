@@ -50,8 +50,7 @@ The location is set system-wide, so Apple Maps and every other app on the phone 
 
 Get the `.dmg` from [Releases](../../releases), open it and drag **LocationLab** into **Applications**.
 
-> The app isn't notarized yet, so macOS blocks it the first time you open it. Go to
-> **System Settings › Privacy & Security** and click **Open Anyway**. You only need to do this once.
+Releases are signed with a Developer ID and notarized by Apple, so the app opens without security warnings.
 
 ### Build from source
 
@@ -63,9 +62,12 @@ Get the `.dmg` from [Releases](../../releases), open it and drag **LocationLab**
 To build a drag-to-install DMG:
 
 ```bash
-./scripts/make-dmg.sh
+./scripts/make-dmg.sh             # local build, runs on your own Macs
+./scripts/make-dmg.sh --release   # Developer ID signed + notarized (needs a paid developer account)
 # → dist/LocationLab <version>.dmg
 ```
+
+See the comments at the top of `scripts/make-dmg.sh` for the one-time setup `--release` needs.
 
 ## Usage
 
@@ -106,7 +108,6 @@ The **Log** pane at the bottom of the window shows the full CLI output for every
 - Editable place lists: add, remove and reorder places and cities
 - Profiles, and JSON import/export of place lists
 - Guided install (or bundling) of `pymobiledevice3`
-- Developer ID signing and notarization
 
 ## Project layout
 
