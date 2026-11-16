@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="760" alt="LocationLab showing the Toronto place list">
+  <img src="docs/screenshot.png" width="760" alt="LocationLab showing favourites organised into folders">
 </p>
 
 ## Features
