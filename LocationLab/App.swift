@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import MapKit
+import Combine
 
 @main
 struct LocationLabApp: App {
@@ -19,11 +20,17 @@ struct LocationLabApp: App {
         .windowResizability(.contentMinSize)
 
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Folder") { UIState.shared.newFolder() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+            }
             CommandGroup(after: .textEditing) {
                 Button("Find Address…") {
                     NotificationCenter.default.post(name: .showAddressSearch, object: nil)
                 }
                 .keyboardShortcut("f", modifiers: .command)
+                Divider()
+                RestoreDefaultsCommand()
             }
         }
 
@@ -57,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum SidebarItem: Hashable {
     case search
+    case favourites
+    case folder(UUID)
     case city(String)
 }
 
@@ -64,42 +73,85 @@ extension Notification.Name {
     static let showAddressSearch = Notification.Name("showAddressSearch")
 }
 
+/// Window-wide UI state that menu commands and context menus both need (prompts and confirmations).
+@MainActor
+final class UIState: ObservableObject {
+    static let shared = UIState()
+
+    enum FolderPrompt: Equatable {
+        case create(moving: [Place])
+        case rename(UUID)
+    }
+
+    @Published var folderPrompt: FolderPrompt?
+    @Published var folderName = ""
+    @Published var folderToDelete: FavouriteFolder?
+    @Published var cityToDelete: City?
+    @Published var confirmRestore = false
+    /// Set after a folder is created so the sidebar can select it.
+    @Published var selectFolder: UUID?
+
+    func newFolder(moving places: [Place] = []) {
+        folderName = ""
+        folderPrompt = .create(moving: places)
+    }
+
+    func rename(_ folder: FavouriteFolder) {
+        folderName = folder.name
+        folderPrompt = .rename(folder.id)
+    }
+
+    func commitFolderPrompt() {
+        let store = LibraryStore.shared
+        switch folderPrompt {
+        case .create(let places):
+            let id = store.createFolder(named: folderName)
+            if !places.isEmpty { store.move(places, to: id) }
+            selectFolder = id
+        case .rename(let id):
+            store.renameFolder(id, to: folderName)
+        case nil:
+            break
+        }
+        folderPrompt = nil
+    }
+}
+
+/// Edit › Restore Deleted Places…, enabled only when something was deleted.
+struct RestoreDefaultsCommand: View {
+    @ObservedObject private var store = LibraryStore.shared
+    var body: some View {
+        Button("Restore Deleted Places…") { UIState.shared.confirmRestore = true }
+            .disabled(store.hiddenDefaultsCount == 0)
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var s = LocationController.shared
-    @State private var selection: SidebarItem? = Catalog.cities.first.map { .city($0.id) }
+    @ObservedObject private var store = LibraryStore.shared
+    @ObservedObject private var ui = UIState.shared
+    @State private var selection: SidebarItem? = LibraryStore.shared.visibleCities.first.map { .city($0.id) } ?? .search
     @State private var showLog = false
     @StateObject private var search = AddressSearch()
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
-                Section("Search") {
-                    Label("Address search", systemImage: "magnifyingglass").tag(SidebarItem.search)
-                }
-                Section("Cities") {
-                    ForEach(Catalog.cities) { city in
-                        Label(city.name, systemImage: city.symbol).tag(SidebarItem.city(city.id))
-                    }
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            sidebar
         } detail: {
             VStack(spacing: 0) {
                 StatusBar()
+                if !s.toolReady && !s.needsSetup {
+                    SetupBanner()
+                }
                 if let err = s.lastError {
                     ErrorBanner(text: err) { s.lastError = nil }
                 }
-                Divider()
-                Group {
-                    if selection == .search {
-                        AddressSearchView(search: search)
-                    } else if case .city(let id) = selection, let city = Catalog.cities.first(where: { $0.id == id }) {
-                        PlaceList(places: city.places)
-                    } else {
-                        Text("Pick a city").foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                if let err = store.storageError {
+                    ErrorBanner(text: err) { store.storageError = nil }
                 }
+                Divider()
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
                 LogDrawer(expanded: $showLog)
             }
@@ -107,9 +159,197 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showAddressSearch)) { _ in
             selection = .search
         }
+        .onChange(of: store.data) { validateSelection() }
+        .onChange(of: ui.selectFolder) {
+            if let id = ui.selectFolder { selection = .folder(id); ui.selectFolder = nil }
+        }
+        .sheet(isPresented: $s.needsSetup) { SetupView() }
+        .alert(folderPromptTitle, isPresented: folderPromptShown) {
+            TextField("Folder name", text: $ui.folderName)
+            Button(folderPromptAction) { ui.commitFolderPrompt() }
+            Button("Cancel", role: .cancel) { ui.folderPrompt = nil }
+        }
+        .confirmationDialog(
+            "Delete the folder “\(ui.folderToDelete?.name ?? "")”?",
+            isPresented: Binding(get: { ui.folderToDelete != nil }, set: { if !$0 { ui.folderToDelete = nil } }),
+            presenting: ui.folderToDelete
+        ) { folder in
+            Button("Delete Folder", role: .destructive) { store.deleteFolder(folder.id) }
+        } message: { folder in
+            let n = store.favourites(in: folder.id).count
+            Text(n == 0 ? "The folder is empty." : "Its \(n) favourite\(n == 1 ? "" : "s") will stay in All Favourites.")
+        }
+        .confirmationDialog(
+            "Delete “\(ui.cityToDelete?.name ?? "")” and its places?",
+            isPresented: Binding(get: { ui.cityToDelete != nil }, set: { if !$0 { ui.cityToDelete = nil } }),
+            presenting: ui.cityToDelete
+        ) { city in
+            Button("Delete City", role: .destructive) { store.hideCity(city.id) }
+        } message: { _ in
+            Text("Favourites from this city are kept. You can bring it back with Edit › Restore Deleted Places.")
+        }
+        .confirmationDialog(
+            "Restore all deleted built-in places and cities?",
+            isPresented: $ui.confirmRestore
+        ) {
+            Button("Restore") { store.restoreDefaults() }
+        } message: {
+            Text("Your favourites and folders aren't changed.")
+        }
+    }
+
+    // MARK: Sidebar
+
+    private var sidebar: some View {
+        List(selection: $selection) {
+            Section("Search") {
+                Label("Address Search", systemImage: "magnifyingglass").tag(SidebarItem.search)
+            }
+
+            Section {
+                Label("All Favourites", systemImage: "star")
+                    .badge(store.data.favourites.count)
+                    .tag(SidebarItem.favourites)
+                    .dropDestination(for: String.self) { items, _ in drop(items, into: nil) }
+                ForEach(store.data.folders) { folder in
+                    Label(folder.name, systemImage: "folder")
+                        .badge(store.favourites(in: folder.id).count)
+                        .tag(SidebarItem.folder(folder.id))
+                        .dropDestination(for: String.self) { items, _ in drop(items, into: folder.id) }
+                        .contextMenu {
+                            Button("Rename…") { ui.rename(folder) }
+                            Button("Delete Folder…", role: .destructive) { ui.folderToDelete = folder }
+                        }
+                }
+                .onMove { store.moveFolders(from: $0, to: $1) }
+            } header: {
+                Text("Favourites")
+            }
+
+            Section("Cities") {
+                ForEach(store.visibleCities) { city in
+                    Label(city.name, systemImage: city.symbol)
+                        .tag(SidebarItem.city(city.id))
+                        .contextMenu {
+                            Button("Delete City…", role: .destructive) { ui.cityToDelete = city }
+                        }
+                }
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Button { ui.newFolder() } label: { Label("New Folder", systemImage: "plus") }
+                    .buttonStyle(.borderless)
+                    .help("New Folder (⇧⌘N)")
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    /// Places dragged onto "All Favourites" or a folder.
+    private func drop(_ items: [String], into folder: UUID?) -> Bool {
+        let places = items.compactMap(Place.init(dragPayload:))
+        guard !places.isEmpty else { return false }
+        if folder == nil {
+            // Onto All Favourites: star anything not starred yet; don't pull starred ones out of their folder.
+            store.move(places.filter { !store.isFavourite($0) }, to: nil)
+        } else {
+            store.move(places, to: folder)
+        }
+        return true
+    }
+
+    // MARK: Detail
+
+    @ViewBuilder private var detail: some View {
+        switch selection {
+        case .search:
+            AddressSearchView(search: search)
+        case .favourites:
+            favouritesList(folder: nil)
+        case .folder(let id):
+            favouritesList(folder: id)
+        case .city(let id):
+            if let city = store.visibleCities.first(where: { $0.id == id }) {
+                if city.places.isEmpty {
+                    ContentUnavailableView("No Places", systemImage: "mappin.slash",
+                                           description: Text("All of this city's places were deleted. Edit › Restore Deleted Places brings them back."))
+                } else {
+                    PlaceList(places: city.places, kind: .city).id(selection)
+                }
+            } else {
+                placeholder
+            }
+        case nil:
+            placeholder
+        }
+    }
+
+    @ViewBuilder private func favouritesList(folder: UUID?) -> some View {
+        let places = store.favourites(in: folder)
+        if places.isEmpty {
+            ContentUnavailableView(
+                folder == nil ? "No Favourites Yet" : "Empty Folder",
+                systemImage: folder == nil ? "star" : "folder",
+                description: Text(folder == nil
+                    ? "Click the star next to any place to save it here."
+                    : "Drag places onto this folder in the sidebar, or right-click a place and choose Move to Folder.")
+            )
+        } else {
+            PlaceList(places: places, kind: .favourites(folder)).id(selection)
+        }
+    }
+
+    private var placeholder: some View {
+        Text("Pick a city").foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Keep the selection valid after a folder or city is deleted.
+    private func validateSelection() {
+        switch selection {
+        case .folder(let id) where store.folder(id) == nil:
+            selection = .favourites
+        case .city(let id) where !store.visibleCities.contains(where: { $0.id == id }):
+            selection = store.visibleCities.first.map { .city($0.id) } ?? .favourites
+        default:
+            break
+        }
+    }
+
+    // MARK: Folder name alert
+
+    private var folderPromptShown: Binding<Bool> {
+        Binding(get: { ui.folderPrompt != nil }, set: { if !$0 { ui.folderPrompt = nil } })
+    }
+    private var folderPromptTitle: String {
+        if case .rename = ui.folderPrompt { return "Rename Folder" }
+        return "New Folder"
+    }
+    private var folderPromptAction: String {
+        if case .rename = ui.folderPrompt { return "Rename" }
+        return "Create"
     }
 }
 
+struct SetupBanner: View {
+    var body: some View {
+        HStack {
+            Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(.orange)
+            Text("pymobiledevice3 isn't set up yet, so LocationLab can't reach your iPhone.").font(.callout)
+            Spacer()
+            Button("Set Up…") {
+                SetupModel.shared.check()
+                LocationController.shared.needsSetup = true
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.12))
+    }
+}
 struct StatusBar: View {
     @ObservedObject private var s = LocationController.shared
 
@@ -233,22 +473,62 @@ struct ErrorBanner: View {
     }
 }
 
+/// Where a list of places is shown; decides which actions apply.
+enum PlaceListKind: Equatable {
+    case city
+    case favourites(UUID?)   // nil = All Favourites
+    case search
+}
+
+nonisolated extension Place {
+    private static let dragPrefix = "locationlab-place:"
+
+    /// Plain-text drag payload: a prefix plus the place as JSON, so drops from elsewhere are ignored.
+    var dragPayload: String {
+        let json = (try? JSONEncoder().encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        return Self.dragPrefix + json
+    }
+
+    init?(dragPayload: String) {
+        guard dragPayload.hasPrefix(Self.dragPrefix),
+              let place = try? JSONDecoder().decode(Place.self, from: Data(dragPayload.dropFirst(Self.dragPrefix.count).utf8))
+        else { return nil }
+        self = place
+    }
+
+    var mapsURL: URL? {
+        let q = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return URL(string: "http://maps.apple.com/?ll=\(lat),\(lon)&q=\(q)")
+    }
+}
+
 struct PlaceRow: View {
     let place: Place
+    let kind: PlaceListKind
+    /// Outside a selectable list (search results): the row handles double-click and its own menu.
+    var standalone = false
     @ObservedObject private var s = LocationController.shared
+    @ObservedObject private var store = LibraryStore.shared
 
     var body: some View {
         let isActive = s.activePlace == place && s.phase == .active
-        HStack {
+        let isFavourite = store.isFavourite(place)
+        let row = HStack {
             Image(systemName: isActive ? "location.fill" : "mappin")
                 .foregroundStyle(isActive ? Color.green : Color.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(place.name).fontWeight(isActive ? .semibold : .regular)
-                Text("\(place.area) · \(place.coordText)")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Button { store.toggleFavourite(place) } label: {
+                Image(systemName: isFavourite ? "star.fill" : "star")
+                    .foregroundStyle(isFavourite ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
+            .accessibilityLabel(isFavourite ? "Remove from Favourites" : "Add to Favourites")
             if isActive {
                 Text("Active").font(.caption).foregroundStyle(.green)
             } else {
@@ -258,19 +538,79 @@ struct PlaceRow: View {
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            if !s.busy && s.toolReady { s.simulate(place) }
+
+        if standalone {
+            row
+                .onTapGesture(count: 2) { if !s.busy && s.toolReady { s.simulate(place) } }
+                .contextMenu { PlaceMenu(places: [place], kind: kind) }
+                .draggable(place.dragPayload)
+        } else {
+            row
         }
-        .contextMenu {
+    }
+
+    private var subtitle: String {
+        // In favourites, show which folder a place is in when looking at All Favourites.
+        if case .favourites(nil) = kind, let id = store.folderID(of: place), let folder = store.folder(id) {
+            return "\(place.area) · \(place.coordText) · \(folder.name)"
+        }
+        return "\(place.area) · \(place.coordText)"
+    }
+}
+
+/// Context-menu actions for one or more places.
+struct PlaceMenu: View {
+    let places: [Place]
+    let kind: PlaceListKind
+    @ObservedObject private var s = LocationController.shared
+    @ObservedObject private var store = LibraryStore.shared
+
+    var body: some View {
+        let ids = Set(places.map(\.id))
+        let allFavourites = places.allSatisfy(store.isFavourite)
+
+        if places.count == 1, let place = places.first {
             Button("Go") { s.simulate(place) }
-            Button("Copy coordinates") {
+                .disabled(s.busy || !s.toolReady)
+            Divider()
+        }
+
+        if allFavourites {
+            Button("Remove from Favourites") { store.removeFavourites(ids) }
+        } else {
+            Button("Add to Favourites") { store.move(places.filter { !store.isFavourite($0) }, to: nil) }
+        }
+
+        Menu("Move to Folder") {
+            let current = Set(places.map { store.isFavourite($0) ? store.folderID(of: $0) : UUID() })
+            ForEach(store.data.folders) { folder in
+                Button {
+                    store.move(places, to: folder.id)
+                } label: {
+                    if current == [folder.id] { Label(folder.name, systemImage: "checkmark") } else { Text(folder.name) }
+                }
+            }
+            if !store.data.folders.isEmpty { Divider() }
+            Button("New Folder…") { UIState.shared.newFolder(moving: places) }
+        }
+
+        if case .favourites(let folder?) = kind {
+            Button("Remove from “\(store.folder(folder)?.name ?? "Folder")”") { store.move(places, to: nil) }
+        }
+
+        if places.count == 1, let place = places.first {
+            Divider()
+            Button("Copy Coordinates") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(place.coordText, forType: .string)
             }
-            Button("Open in Maps") {
-                if let url = URL(string: "http://maps.apple.com/?ll=\(place.lat),\(place.lon)&q=\(place.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
-                    NSWorkspace.shared.open(url)
-                }
+            Button("Open in Maps") { if let url = place.mapsURL { NSWorkspace.shared.open(url) } }
+        }
+
+        if kind == .city {
+            Divider()
+            Button(places.count == 1 ? "Delete Place" : "Delete \(places.count) Places", role: .destructive) {
+                store.hidePlaces(ids)
             }
         }
     }
@@ -278,14 +618,48 @@ struct PlaceRow: View {
 
 struct PlaceList: View {
     let places: [Place]
+    let kind: PlaceListKind
+    @State private var selection = Set<Place.ID>()
+    @ObservedObject private var s = LocationController.shared
+    @ObservedObject private var store = LibraryStore.shared
+
+    private var canReorder: Bool { if case .favourites = kind { return true } else { return false } }
 
     var body: some View {
-        List(places) { place in
-            PlaceRow(place: place)
+        List(selection: $selection) {
+            ForEach(places) { place in
+                if canReorder {
+                    // Reordering uses the list's own drag; drag to folders from a city list or search.
+                    PlaceRow(place: place, kind: kind)
+                } else {
+                    PlaceRow(place: place, kind: kind).draggable(place.dragPayload)
+                }
+            }
+            .onMove(perform: canReorder ? { from, to in
+                if case .favourites(let folder) = kind { store.reorderFavourites(in: folder, from: from, to: to) }
+            } : nil)
         }
+        .contextMenu(forSelectionType: Place.ID.self) { ids in
+            PlaceMenu(places: places.filter { ids.contains($0.id) }, kind: kind)
+        } primaryAction: { ids in
+            // Double-click or Return.
+            if ids.count == 1, let place = places.first(where: { ids.contains($0.id) }), !s.busy, s.toolReady {
+                s.simulate(place)
+            }
+        }
+        .onDeleteCommand { deleteSelection() }
+    }
+
+    private func deleteSelection() {
+        guard !selection.isEmpty else { return }
+        switch kind {
+        case .city: store.hidePlaces(selection)
+        case .favourites: store.removeFavourites(selection)
+        case .search: return
+        }
+        selection.removeAll()
     }
 }
-
 struct AddressSearchView: View {
     @ObservedObject var search: AddressSearch
     @FocusState private var fieldFocused: Bool
@@ -329,7 +703,7 @@ struct AddressSearchView: View {
                     }
                     if !search.results.isEmpty {
                         Section("Results") {
-                            ForEach(search.results) { PlaceRow(place: $0) }
+                            ForEach(search.results) { PlaceRow(place: $0, kind: .search, standalone: true) }
                         }
                     }
                     if !search.suggestions.isEmpty {
@@ -401,26 +775,57 @@ struct LogDrawer: View {
 
 struct SettingsView: View {
     @ObservedObject private var s = LocationController.shared
+    @ObservedObject private var store = LibraryStore.shared
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
-            Section {
-                TextField("pymobiledevice3 path", text: $s.toolPath)
+            Section("pymobiledevice3") {
+                TextField("Path", text: $s.toolPath)
                     .font(.system(.body, design: .monospaced))
                 HStack {
                     Image(systemName: s.toolReady ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(s.toolReady ? .green : .red)
-                    Text(s.toolReady ? "Found" : "Not an executable file")
+                    Text(s.toolReady ? "Found" + (s.toolVersion.map { " · version \($0)" } ?? "") : "Not an executable file")
                     Spacer()
                     Button("Auto-detect") { s.autodetect() }
                 }
-            } footer: {
-                Text("In Terminal, `which pymobiledevice3` prints the path.")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text(SetupModel.isManagedInstallPresent
+                         ? "Installed by LocationLab. Update or reinstall it from Setup."
+                         : "Don't have it? Setup can install it for you.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open Setup…") {
+                        openWindow(id: "main")
+                        SetupModel.shared.check()
+                        s.needsSetup = true
+                    }
+                }
+            }
+
+            Section("Places") {
+                HStack {
+                    let n = store.hiddenDefaultsCount
+                    Text(n == 0 ? "No built-in places or cities are deleted."
+                                : "Deleted built-in places and cities: \(n)")
+                    Spacer()
+                    Button("Restore Deleted Places") { store.restoreDefaults() }
+                        .disabled(n == 0)
+                }
+                HStack {
+                    Text("Favourites and folders are saved in Application Support.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Show in Finder") {
+                        try? FileManager.default.createDirectory(at: AppSupport.directory, withIntermediateDirectories: true)
+                        NSWorkspace.shared.activateFileViewerSelecting([AppSupport.directory])
+                    }
+                }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520)
+        .frame(width: 540)
         .padding()
     }
 }

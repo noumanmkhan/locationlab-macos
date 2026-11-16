@@ -24,11 +24,13 @@
 ## Features
 
 - **Built-in places**: 8 cities with 10–12 well-known places each (Toronto, Vancouver, New York, San Francisco, London, Dubai, Hyderabad, Tokyo). Click **Go** or double-click a row.
+- **Favourites and folders**: star any place (built-in or from address search) to keep it in **Favourites**. Make your own folders with **+ New Folder** (<kbd>⇧⌘N</kbd>), then drag places onto a folder or right-click › **Move to Folder**. Drag to reorder.
+- **Trim the built-in list**: delete places you don't use (select and press <kbd>Delete</kbd>, or right-click), or right-click a city › **Delete City…**. **Edit › Restore Deleted Places…** brings them all back.
 - **Address search**: look up any street address or place name with Apple Maps (MapKit), then send it to the phone. Press <kbd>⌘F</kbd> to search from anywhere.
 - **Stop & Clear** (<kbd>⌘.</kbd>): stops the simulation and restores the phone's real location. It works even if the phone was left on a fake location by an earlier session.
 - **Safe quit**: quitting the app clears the simulated location first.
 - **Readable errors**: common failures (phone locked, not paired, Developer Mode off, no device) are shown as plain-language messages, with the raw CLI output in a collapsible log.
-- **Auto-detects `pymobiledevice3`**: no PATH setup needed. You can override the path in Settings (<kbd>⌘,</kbd>).
+- **Guided setup**: if `pymobiledevice3` isn't installed, LocationLab offers to install it for you into its own private Python environment (the exact commands and the PyPI source are shown first), or gives you the Terminal command to run yourself. If you already have it, it's found automatically; you can also set the path in Settings (<kbd>⌘,</kbd>).
 
 The location is set system-wide, so Apple Maps and every other app on the phone see it, including the app you're testing.
 
@@ -36,11 +38,10 @@ The location is set system-wide, so Apple Maps and every other app on the phone 
 
 - A Mac running **macOS 14 Sonoma** or later
 - An iPhone on **iOS 17** or later, with **Developer Mode** on (Settings › Privacy & Security › Developer Mode), paired with and trusted by the Mac
-- **[pymobiledevice3](https://github.com/doronz88/pymobiledevice3)**, which does the actual talking to the phone:
-
-  ```bash
-  python3 -m pip install -U pymobiledevice3
-  ```
+- **[pymobiledevice3](https://github.com/doronz88/pymobiledevice3)**, which does the actual talking to the phone. On first launch LocationLab checks for it and offers to set it up:
+  - **Install for Me** creates a private environment in `~/Library/Application Support/LocationLab/python` and installs `pymobiledevice3` from PyPI into it. Your own Python isn't touched and no admin password is needed.
+  - Or install it yourself: `python3 -m pip install -U pymobiledevice3`
+  - Python comes with Apple's Command Line Tools (`xcode-select --install`); the setup screen has a button for that too.
 
   Connect the phone by USB the first time and tap **Trust** when asked. After that, Wi-Fi works too.
 
@@ -72,7 +73,7 @@ See the comments at the top of `scripts/make-dmg.sh` for the one-time setup `--r
 ## Usage
 
 1. Connect and unlock the iPhone.
-2. Pick a city in the sidebar (or **Address search**), then click **Go** next to a place.
+2. Pick a city, a favourites folder or **Address Search** in the sidebar, then click **Go** next to a place (or double-click it).
    The status bar shows *Setting location…* and then the active place.
 3. Pick another place to move again.
 4. Click **Stop & Clear** (<kbd>⌘.</kbd>) to go back to the real location.
@@ -95,7 +96,7 @@ LocationLab is a SwiftUI front end for `pymobiledevice3`:
 
 | Problem | Fix |
 | --- | --- |
-| *pymobiledevice3 not found* | Run `which pymobiledevice3` in Terminal and paste the path into Settings (<kbd>⌘,</kbd>). |
+| *pymobiledevice3 isn't set up* | Click **Set Up…** in the banner (or Settings › **Open Setup…**). If you installed it yourself, run `which pymobiledevice3` in Terminal and paste the path into Settings. |
 | *No iPhone found* | Connect by USB, unlock the phone, and check it trusts this Mac. |
 | *Developer Mode is off* | iPhone Settings › Privacy & Security › Developer Mode, then restart the phone. |
 | Phone still shows the fake location | Wait ~20 s for a GPS fix. If it's still stuck, click **Stop & Clear** again, or turn Location Services off and on. |
@@ -103,18 +104,26 @@ LocationLab is a SwiftUI front end for `pymobiledevice3`:
 
 The **Log** pane at the bottom of the window shows the full CLI output for every command.
 
+## Your data and uninstalling
+
+Favourites, folders and deleted built-ins are saved in `~/Library/Application Support/LocationLab/library.json` (Settings › **Show in Finder**). A copy of `pymobiledevice3` installed by LocationLab lives in the `python` folder next to it.
+
+To uninstall, quit LocationLab, drag it to the Trash, and delete `~/Library/Application Support/LocationLab`.
+
 ## Roadmap
 
-- Editable place lists: add, remove and reorder places and cities
-- Profiles, and JSON import/export of place lists
-- Guided install (or bundling) of `pymobiledevice3`
+- Add your own places and cities (custom coordinates)
+- JSON import/export of places and favourites
+- Simulated routes (move along a path)
 
 ## Project layout
 
 ```
 LocationLab/
-├── App.swift                 SwiftUI app, window, status bar, place lists, settings
+├── App.swift                 SwiftUI app, window, sidebar, place lists, settings
 ├── LocationController.swift  Runs pymobiledevice3, tracks state, tunnel control, error mapping
+├── Library.swift             Favourites, folders and deleted built-ins (saved as JSON)
+├── Setup.swift               First-launch setup: finds Python, installs pymobiledevice3
 ├── AddressSearch.swift       MapKit address search (suggestions + lookup)
 └── Places.swift              Place / City models (Codable) and the built-in list
 scripts/make-dmg.sh           Release build + DMG packaging

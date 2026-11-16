@@ -51,8 +51,15 @@ final class LocationController: ObservableObject {
     @Published var recentlyCleared = false
     private var clearedNoteTask: Task<Void, Never>?
     @Published var toolPath: String {
-        didSet { UserDefaults.standard.set(toolPath, forKey: "toolPath") }
+        didSet {
+            UserDefaults.standard.set(toolPath, forKey: "toolPath")
+            if toolPath != oldValue { toolVersion = nil }
+        }
     }
+    /// Shown in Setup/Settings, e.g. "11.56.1".
+    @Published var toolVersion: String?
+    /// True when pymobiledevice3 couldn't be found; the main window shows the setup sheet.
+    @Published var needsSetup = false
 
     private var holder: Process?
     private var holderStdin: Pipe?
@@ -76,10 +83,22 @@ final class LocationController: ObservableObject {
             toolPath = found
             appendLog("Found pymobiledevice3 at \(found)\n")
         }
-        if !toolReady {
-            lastError = "pymobiledevice3 not found. Set its path in Settings (⌘,)."
+        if toolReady {
+            await refreshToolVersion()
+        } else {
+            needsSetup = true
         }
         await refreshTunnel()
+    }
+
+    /// Reads `pymobiledevice3 version` (last line that looks like a version number).
+    func refreshToolVersion() async {
+        guard toolReady else { toolVersion = nil; return }
+        let (code, out) = await Shell.run(toolPath, ["version"], timeout: 60)
+        guard code == 0 else { toolVersion = nil; return }
+        toolVersion = out.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { $0.first?.isNumber == true && !$0.contains(" ") }
     }
 
     func autodetect() {
@@ -88,6 +107,7 @@ final class LocationController: ObservableObject {
                 toolPath = found
                 lastError = nil
                 appendLog("Found pymobiledevice3 at \(found)\n")
+                await refreshToolVersion()
             } else {
                 lastError = "Couldn't find pymobiledevice3. In Terminal run `which pymobiledevice3` and paste the path in Settings."
             }
@@ -95,6 +115,8 @@ final class LocationController: ObservableObject {
     }
 
     static func locateTool() async -> String? {
+        // A copy installed by LocationLab's own setup wins.
+        if FileManager.default.isExecutableFile(atPath: SetupModel.managedTool) { return SetupModel.managedTool }
         // GUI apps don't inherit your shell PATH, so ask a login+interactive zsh.
         let (_, out) = await Shell.run("/bin/zsh", ["-ilc", "command -v pymobiledevice3"], timeout: 10)
         let fm = FileManager.default
@@ -128,7 +150,7 @@ final class LocationController: ObservableObject {
     func simulate(_ place: Place) {
         guard !busy else { return }
         guard toolReady else {
-            lastError = "pymobiledevice3 not found. Set its path in Settings (⌘,)."
+            needsSetup = true
             return
         }
         phase = .setting
